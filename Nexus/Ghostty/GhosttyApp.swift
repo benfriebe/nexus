@@ -136,6 +136,9 @@ final class GhosttyApp {
             }
             return true
 
+        case GHOSTTY_ACTION_RING_BELL:
+            return true
+
         case GHOSTTY_ACTION_CLOSE_ALL_WINDOWS:
             return false
 

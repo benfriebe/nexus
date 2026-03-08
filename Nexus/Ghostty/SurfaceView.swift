@@ -172,6 +172,12 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
 
     // MARK: - Keyboard input
 
+    override func doCommand(by selector: Selector) {
+        // Ghostty handles all key bindings internally. Without this override,
+        // NSView's default calls NSBeep() for unhandled selectors (Enter,
+        // Backspace, arrows, etc.).
+    }
+
     override func keyDown(with event: NSEvent) {
         // Step 1: Interpret the key event to get the text it produces.
         // This calls our NSTextInputClient methods (insertText/setMarkedText)
