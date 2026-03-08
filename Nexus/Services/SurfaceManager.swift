@@ -11,6 +11,13 @@ final class SurfaceManager: Sendable {
 
     @MainActor
     func createSurface(paneID: UUID, workingDirectory: String) {
+        // Guard against duplicate creation. Both the TCA effect and
+        // SurfaceContainerView.makeNSView can call this; whichever runs
+        // first wins. Without this check, the second call replaces the
+        // displayed surface with a fresh one, orphaning the user's session.
+        let exists = lock.withLock { surfaces[paneID] != nil }
+        guard !exists else { return }
+
         let surface = SurfaceView(paneID: paneID, workingDirectory: workingDirectory)
         lock.withLock {
             surfaces[paneID] = surface

@@ -18,9 +18,7 @@ struct SurfaceContainerView: NSViewRepresentable {
         }
 
         if let surface = surfaceManager.surface(for: paneID) {
-            surface.frame = container.bounds
-            surface.autoresizingMask = [.width, .height]
-            container.addSubview(surface)
+            embedSurface(surface, in: container)
 
             if isFocused {
                 DispatchQueue.main.async {
@@ -39,12 +37,11 @@ struct SurfaceContainerView: NSViewRepresentable {
             subview.removeFromSuperview()
         }
 
-        // Add surface to this container if needed
+        // Re-parent if needed (happens when SwiftUI recreates the container
+        // after layout changes, e.g., closing a sibling pane collapses a split)
         if surface.superview !== container {
             surface.removeFromSuperview()
-            surface.frame = container.bounds
-            surface.autoresizingMask = [.width, .height]
-            container.addSubview(surface)
+            embedSurface(surface, in: container)
         }
 
         // Handle focus
@@ -53,6 +50,20 @@ struct SurfaceContainerView: NSViewRepresentable {
                 surface.window?.makeFirstResponder(surface)
             }
         }
+    }
+
+    /// Add the surface to the container using Auto Layout constraints.
+    /// Constraints handle zero-initial-bounds correctly (unlike autoresizingMask),
+    /// which matters when SwiftUI recreates the container during layout transitions.
+    private func embedSurface(_ surface: NSView, in container: NSView) {
+        surface.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(surface)
+        NSLayoutConstraint.activate([
+            surface.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            surface.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            surface.topAnchor.constraint(equalTo: container.topAnchor),
+            surface.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
     }
 }
 

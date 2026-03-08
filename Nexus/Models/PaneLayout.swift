@@ -1,6 +1,17 @@
 import Foundation
 
+struct SplitDividerInfo: Identifiable {
+    let id: String
+    let direction: PaneLayout.SplitDirection
+    let rect: CGRect
+    let firstChildPaneID: UUID?
+    let available: CGFloat
+    let firstSize: CGFloat
+}
+
 indirect enum PaneLayout: Equatable, Codable, Sendable {
+
+    static let dividerThickness: CGFloat = 4
     case leaf(UUID)
     case split(SplitDirection, ratio: Double, first: PaneLayout, second: PaneLayout)
     case empty
@@ -93,6 +104,102 @@ indirect enum PaneLayout: Equatable, Codable, Sendable {
         let ids = allPaneIDs
         guard let index = ids.firstIndex(of: currentID), ids.count > 1 else { return nil }
         return ids[(index - 1 + ids.count) % ids.count]
+    }
+
+    // MARK: - Split Ratio Updates
+
+    // MARK: - Frame Computation
+
+    /// Recursively compute each leaf pane's frame rect within the given bounds.
+    func paneFrames(in bounds: CGRect) -> [UUID: CGRect] {
+        switch self {
+        case .leaf(let id):
+            return [id: bounds]
+        case .split(let direction, let ratio, let first, let second):
+            let (firstBounds, secondBounds) = splitBounds(
+                direction: direction, ratio: ratio, in: bounds
+            )
+            var frames = first.paneFrames(in: firstBounds)
+            for (id, rect) in second.paneFrames(in: secondBounds) {
+                frames[id] = rect
+            }
+            return frames
+        case .empty:
+            return [:]
+        }
+    }
+
+    /// Recursively compute divider positions for drag handles.
+    func splitDividers(in bounds: CGRect, prefix: String = "d") -> [SplitDividerInfo] {
+        switch self {
+        case .leaf, .empty:
+            return []
+        case .split(let direction, let ratio, let first, let second):
+            let totalSize = direction == .horizontal ? bounds.width : bounds.height
+            let available = totalSize - Self.dividerThickness
+            let firstSize = available * ratio
+
+            let (firstBounds, secondBounds) = splitBounds(
+                direction: direction, ratio: ratio, in: bounds
+            )
+
+            let dividerRect: CGRect
+            if direction == .horizontal {
+                dividerRect = CGRect(
+                    x: bounds.minX + firstSize, y: bounds.minY,
+                    width: Self.dividerThickness, height: bounds.height
+                )
+            } else {
+                dividerRect = CGRect(
+                    x: bounds.minX, y: bounds.minY + firstSize,
+                    width: bounds.width, height: Self.dividerThickness
+                )
+            }
+
+            let info = SplitDividerInfo(
+                id: prefix,
+                direction: direction,
+                rect: dividerRect,
+                firstChildPaneID: first.allPaneIDs.first,
+                available: available,
+                firstSize: firstSize
+            )
+
+            return [info]
+                + first.splitDividers(in: firstBounds, prefix: prefix + "L")
+                + second.splitDividers(in: secondBounds, prefix: prefix + "R")
+        }
+    }
+
+    /// Compute the two child bounds for a split at the given ratio.
+    private func splitBounds(
+        direction: SplitDirection, ratio: Double, in bounds: CGRect
+    ) -> (first: CGRect, second: CGRect) {
+        let totalSize = direction == .horizontal ? bounds.width : bounds.height
+        let available = totalSize - Self.dividerThickness
+        let firstSize = available * ratio
+
+        if direction == .horizontal {
+            let firstBounds = CGRect(
+                x: bounds.minX, y: bounds.minY,
+                width: firstSize, height: bounds.height
+            )
+            let secondBounds = CGRect(
+                x: bounds.minX + firstSize + Self.dividerThickness, y: bounds.minY,
+                width: available - firstSize, height: bounds.height
+            )
+            return (firstBounds, secondBounds)
+        } else {
+            let firstBounds = CGRect(
+                x: bounds.minX, y: bounds.minY,
+                width: bounds.width, height: firstSize
+            )
+            let secondBounds = CGRect(
+                x: bounds.minX, y: bounds.minY + firstSize + Self.dividerThickness,
+                width: bounds.width, height: available - firstSize
+            )
+            return (firstBounds, secondBounds)
+        }
     }
 
     // MARK: - Split Ratio Updates

@@ -1,8 +1,10 @@
 import ComposableArchitecture
 import SwiftUI
 
-/// Recursively renders a PaneLayout tree as split views.
-/// Leaf nodes become terminal surfaces, split nodes become GeometryReader-based containers.
+/// Renders a PaneLayout as a flat ZStack with stable ForEach identity.
+/// Pane frames are computed mathematically from the layout tree, so
+/// SurfaceContainerView instances are never destroyed during layout changes —
+/// only repositioned/resized.
 struct PaneGridView: View {
     let layout: PaneLayout
     let panes: IdentifiedArrayOf<Pane>
@@ -13,139 +15,80 @@ struct PaneGridView: View {
     let onUpdateRatio: (UUID, Double) -> Void
 
     var body: some View {
-        LayoutNodeView(
-            layout: layout,
-            panes: panes,
-            focusedPaneID: focusedPaneID,
-            onCreatePane: onCreatePane,
-            onClosePane: onClosePane,
-            onFocusPane: onFocusPane,
-            onUpdateRatio: onUpdateRatio
+        if layout.isEmpty {
+            emptyView
+        } else {
+            GeometryReader { geometry in
+                let bounds = CGRect(origin: .zero, size: geometry.size)
+                let frames = layout.paneFrames(in: bounds)
+                let dividers = layout.splitDividers(in: bounds)
+
+                ZStack(alignment: .topLeading) {
+                    // Stable pane views — ForEach preserves identity across layout changes
+                    ForEach(panes) { pane in
+                        if let frame = frames[pane.id] {
+                            paneView(pane: pane, frame: frame)
+                        }
+                    }
+                    // Divider drag handles
+                    ForEach(dividers) { info in
+                        dividerView(info: info)
+                    }
+                }
+            }
+            // Prevent NavigationSplitView's implicit detail animations from
+            // interfering with NSView re-parenting during layout transitions.
+            .transaction { $0.animation = nil }
+        }
+    }
+
+    private func paneView(pane: Pane, frame: CGRect) -> some View {
+        VStack(spacing: 0) {
+            PaneHeaderView(
+                pane: pane,
+                isFocused: pane.id == focusedPaneID,
+                onClose: { onClosePane(pane.id) }
+            )
+
+            SurfaceContainerView(
+                paneID: pane.id,
+                workingDirectory: pane.workingDirectory,
+                isFocused: pane.id == focusedPaneID
+            )
+        }
+        .border(
+            pane.id == focusedPaneID ? Color.accentColor.opacity(0.4) : Color.clear,
+            width: 1
         )
+        .frame(width: frame.width, height: frame.height)
+        .offset(x: frame.origin.x, y: frame.origin.y)
     }
-}
 
-/// Separate struct to allow recursive type usage with AnyView.
-private struct LayoutNodeView: View {
-    let layout: PaneLayout
-    let panes: IdentifiedArrayOf<Pane>
-    let focusedPaneID: UUID?
-    let onCreatePane: () -> Void
-    let onClosePane: (UUID) -> Void
-    let onFocusPane: (UUID) -> Void
-    let onUpdateRatio: (UUID, Double) -> Void
-
-    var body: some View {
-        switch layout {
-        case .leaf(let paneID):
-            if let pane = panes[id: paneID] {
-                VStack(spacing: 0) {
-                    PaneHeaderView(
-                        pane: pane,
-                        isFocused: paneID == focusedPaneID,
-                        onClose: { onClosePane(paneID) }
-                    )
-
-                    SurfaceContainerView(
-                        paneID: paneID,
-                        workingDirectory: pane.workingDirectory,
-                        isFocused: paneID == focusedPaneID
-                    )
-                    .id(paneID)
-                }
-                .border(
-                    paneID == focusedPaneID ? Color.accentColor.opacity(0.4) : Color.clear,
-                    width: 1
-                )
-            }
-
-        case .split(let direction, let ratio, let first, let second):
-            SplitLayoutView(
-                direction: direction,
-                ratio: ratio,
-                first: first,
-                second: second,
-                panes: panes,
-                focusedPaneID: focusedPaneID,
-                onCreatePane: onCreatePane,
-                onClosePane: onClosePane,
-                onFocusPane: onFocusPane,
-                onUpdateRatio: onUpdateRatio
-            )
-
-        case .empty:
-            VStack(spacing: 12) {
-                Spacer()
-                Image(systemName: "terminal")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.quaternary)
-                Text("No panes")
-                    .foregroundStyle(.secondary)
-                    .font(.title3)
-                Button("New Pane") {
-                    onCreatePane()
-                }
-                .keyboardShortcut(.return, modifiers: [])
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    private func dividerView(info: SplitDividerInfo) -> some View {
+        SplitDividerView(direction: info.direction) { delta in
+            guard let id = info.firstChildPaneID else { return }
+            let newRatio = (info.firstSize + delta) / info.available
+            onUpdateRatio(id, newRatio)
         }
+        .frame(width: info.rect.width, height: info.rect.height)
+        .offset(x: info.rect.origin.x, y: info.rect.origin.y)
     }
-}
 
-/// Renders a split node with two children and a divider.
-private struct SplitLayoutView: View {
-    let direction: PaneLayout.SplitDirection
-    let ratio: Double
-    let first: PaneLayout
-    let second: PaneLayout
-    let panes: IdentifiedArrayOf<Pane>
-    let focusedPaneID: UUID?
-    let onCreatePane: () -> Void
-    let onClosePane: (UUID) -> Void
-    let onFocusPane: (UUID) -> Void
-    let onUpdateRatio: (UUID, Double) -> Void
-
-    var body: some View {
-        GeometryReader { geometry in
-            let totalSize = direction == .horizontal
-                ? geometry.size.width
-                : geometry.size.height
-            let dividerSize: CGFloat = 4
-            let available = totalSize - dividerSize
-            let firstSize = available * ratio
-            let secondSize = available * (1 - ratio)
-            let firstPaneID = first.allPaneIDs.first
-
-            let firstChild = LayoutNodeView(
-                layout: first, panes: panes, focusedPaneID: focusedPaneID,
-                onCreatePane: onCreatePane, onClosePane: onClosePane,
-                onFocusPane: onFocusPane, onUpdateRatio: onUpdateRatio
-            )
-            let secondChild = LayoutNodeView(
-                layout: second, panes: panes, focusedPaneID: focusedPaneID,
-                onCreatePane: onCreatePane, onClosePane: onClosePane,
-                onFocusPane: onFocusPane, onUpdateRatio: onUpdateRatio
-            )
-            let divider = SplitDividerView(direction: direction) { delta in
-                guard let id = firstPaneID else { return }
-                let newRatio = (firstSize + delta) / available
-                onUpdateRatio(id, newRatio)
+    private var emptyView: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "terminal")
+                .font(.system(size: 36))
+                .foregroundStyle(.quaternary)
+            Text("No panes")
+                .foregroundStyle(.secondary)
+                .font(.title3)
+            Button("New Pane") {
+                onCreatePane()
             }
-
-            if direction == .horizontal {
-                HStack(spacing: 0) {
-                    firstChild.frame(width: firstSize)
-                    divider
-                    secondChild.frame(width: secondSize)
-                }
-            } else {
-                VStack(spacing: 0) {
-                    firstChild.frame(height: firstSize)
-                    divider
-                    secondChild.frame(height: secondSize)
-                }
-            }
+            .keyboardShortcut(.return, modifiers: [])
+            Spacer()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
