@@ -53,7 +53,7 @@ struct NexusApp: App {
         }
 
         Settings {
-            SettingsView(store: store.scope(state: \.settings, action: \.settings))
+            SettingsView(store: store)
         }
     }
 }

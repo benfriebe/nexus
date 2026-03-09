@@ -25,6 +25,7 @@ struct PersistenceTests {
         let workspace = WorkspaceFeature.State(
             id: wsID,
             name: "Test Workspace",
+            slug: "test-workspace-\(wsID.uuidString.prefix(8).lowercased())",
             color: .green,
             panes: [pane],
             layout: .leaf(paneID),
@@ -42,12 +43,12 @@ struct PersistenceTests {
         try await Task.sleep(for: .seconds(1))
 
         // Load
-        let (loaded, activeID) = await persistence.load()
+        let result = await persistence.load()
 
-        #expect(loaded.count == 1)
-        #expect(activeID == wsID)
+        #expect(result.workspaces.count == 1)
+        #expect(result.activeWorkspaceID == wsID)
 
-        let loadedWS = loaded.first!
+        let loadedWS = result.workspaces.first!
         #expect(loadedWS.id == wsID)
         #expect(loadedWS.name == "Test Workspace")
         #expect(loadedWS.color == .green)
@@ -61,9 +62,10 @@ struct PersistenceTests {
         let db = try DatabaseService(inMemory: true)
         let persistence = PersistenceService(db: db)
 
-        let (workspaces, activeID) = await persistence.load()
-        #expect(workspaces.isEmpty)
-        #expect(activeID == nil)
+        let result = await persistence.load()
+        #expect(result.workspaces.isEmpty)
+        #expect(result.activeWorkspaceID == nil)
+        #expect(result.repoRegistry.isEmpty)
     }
 
     @Test func multipleWorkspacesPersistOrder() async throws {
@@ -82,11 +84,104 @@ struct PersistenceTests {
         await persistence.save(workspaces: workspaces, activeWorkspaceID: ws2.id)
         try await Task.sleep(for: .seconds(1))
 
-        let (loaded, activeID) = await persistence.load()
-        #expect(loaded.count == 3)
-        #expect(loaded[0].name == "First")
-        #expect(loaded[1].name == "Second")
-        #expect(loaded[2].name == "Third")
-        #expect(activeID == ws2.id)
+        let result = await persistence.load()
+        #expect(result.workspaces.count == 3)
+        #expect(result.workspaces[0].name == "First")
+        #expect(result.workspaces[1].name == "Second")
+        #expect(result.workspaces[2].name == "Third")
+        #expect(result.activeWorkspaceID == ws2.id)
+    }
+
+    @Test func repoRegistryRoundTrip() async throws {
+        let db = try DatabaseService(inMemory: true)
+        let persistence = PersistenceService(db: db)
+
+        let repoID = UUID()
+        let repo = Repo(
+            id: repoID,
+            path: "/Users/test/code/my-repo",
+            name: "my-repo",
+            remoteURL: "https://github.com/user/my-repo.git",
+            lastAccessedAt: Date(timeIntervalSince1970: 3000)
+        )
+
+        var repos = IdentifiedArrayOf<Repo>()
+        repos.append(repo)
+
+        let ws = WorkspaceFeature.State(name: "Test", color: .blue)
+        var workspaces = IdentifiedArrayOf<WorkspaceFeature.State>()
+        workspaces.append(ws)
+
+        await persistence.save(
+            workspaces: workspaces,
+            activeWorkspaceID: ws.id,
+            repoRegistry: repos
+        )
+        try await Task.sleep(for: .seconds(1))
+
+        let result = await persistence.load()
+        #expect(result.repoRegistry.count == 1)
+        #expect(result.repoRegistry.first?.id == repoID)
+        #expect(result.repoRegistry.first?.path == "/Users/test/code/my-repo")
+        #expect(result.repoRegistry.first?.name == "my-repo")
+        #expect(result.repoRegistry.first?.remoteURL == "https://github.com/user/my-repo.git")
+    }
+
+    @Test func repoAssociationRoundTrip() async throws {
+        let db = try DatabaseService(inMemory: true)
+        let persistence = PersistenceService(db: db)
+
+        let repoID = UUID()
+        let repo = Repo(
+            id: repoID,
+            path: "/Users/test/code/my-repo",
+            name: "my-repo"
+        )
+
+        var repos = IdentifiedArrayOf<Repo>()
+        repos.append(repo)
+
+        let assocID = UUID()
+        let assoc = RepoAssociation(
+            id: assocID,
+            repoID: repoID,
+            worktreePath: "/Users/test/code/my-repo/.worktrees/dev",
+            branchName: "feature/dev"
+        )
+
+        let paneID = UUID()
+        let pane = Pane(id: paneID)
+        let wsID = UUID()
+        let ws = WorkspaceFeature.State(
+            id: wsID,
+            name: "Test",
+            slug: "test-\(wsID.uuidString.prefix(8).lowercased())",
+            color: .blue,
+            panes: [pane],
+            layout: .leaf(paneID),
+            focusedPaneID: paneID,
+            repoAssociations: [assoc],
+            createdAt: Date(),
+            lastAccessedAt: Date()
+        )
+
+        var workspaces = IdentifiedArrayOf<WorkspaceFeature.State>()
+        workspaces.append(ws)
+
+        await persistence.save(
+            workspaces: workspaces,
+            activeWorkspaceID: ws.id,
+            repoRegistry: repos
+        )
+        try await Task.sleep(for: .seconds(1))
+
+        let result = await persistence.load()
+        #expect(result.workspaces.count == 1)
+        let loadedWS = result.workspaces.first!
+        #expect(loadedWS.repoAssociations.count == 1)
+        #expect(loadedWS.repoAssociations.first?.id == assocID)
+        #expect(loadedWS.repoAssociations.first?.repoID == repoID)
+        #expect(loadedWS.repoAssociations.first?.worktreePath == "/Users/test/code/my-repo/.worktrees/dev")
+        #expect(loadedWS.repoAssociations.first?.branchName == "feature/dev")
     }
 }

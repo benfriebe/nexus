@@ -1,7 +1,7 @@
 import ComposableArchitecture
 import SwiftUI
 
-/// Root view: HStack with workspace sidebar + pane grid detail.
+/// Root view: HStack with workspace sidebar + pane grid detail + optional inspector.
 struct ContentView: View {
     let store: StoreOf<AppReducer>
     @Environment(\.surfaceManager) private var surfaceManager
@@ -59,8 +59,14 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+
+                if store.isInspectorVisible {
+                    Divider()
+                    WorkspaceInspectorView(store: store)
+                }
             }
             .animation(.default, value: store.isSidebarVisible)
+            .animation(.default, value: store.isInspectorVisible)
             .sheet(isPresented: Binding(
                 get: { store.isNewWorkspaceSheetPresented },
                 set: { if !$0 { store.send(.dismissNewWorkspaceSheet) } }

@@ -42,6 +42,11 @@ struct NexusCommands: Commands {
                 store.send(.toggleSidebar)
             }
             .keyboardShortcut("s", modifiers: [.command, .shift])
+
+            Button("Toggle Inspector") {
+                store.send(.toggleInspector)
+            }
+            .keyboardShortcut("i", modifiers: [.command])
         }
     }
 }

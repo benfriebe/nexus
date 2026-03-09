@@ -64,6 +64,34 @@ final class DatabaseService: Sendable {
             }
         }
 
+        migrator.registerMigration("v2_repos") { db in
+            try db.create(table: "repo") { t in
+                t.primaryKey("id", .text)
+                t.column("path", .text).notNull().unique()
+                t.column("name", .text).notNull()
+                t.column("remoteURL", .text)
+                t.column("lastAccessedAt", .double).notNull()
+            }
+
+            try db.create(table: "repoAssociation") { t in
+                t.primaryKey("id", .text)
+                t.column("workspaceID", .text)
+                    .notNull()
+                    .references("workspace", onDelete: .cascade)
+                t.column("repoID", .text)
+                    .notNull()
+                    .references("repo", onDelete: .cascade)
+                t.column("worktreePath", .text).notNull()
+                t.column("branchName", .text)
+            }
+        }
+
+        migrator.registerMigration("v3_workspace_slug") { db in
+            try db.alter(table: "workspace") { t in
+                t.add(column: "slug", .text).defaults(to: "")
+            }
+        }
+
         try migrator.migrate(writer)
     }
 }
@@ -75,6 +103,7 @@ struct WorkspaceRecord: Codable, FetchableRecord, PersistableRecord {
 
     var id: String
     var name: String
+    var slug: String
     var color: String
     var layoutJSON: String
     var focusedPaneID: String?
@@ -100,4 +129,24 @@ struct AppStateRecord: Codable, FetchableRecord, PersistableRecord {
 
     var key: String
     var value: String?
+}
+
+struct RepoRecord: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "repo"
+
+    var id: String
+    var path: String
+    var name: String
+    var remoteURL: String?
+    var lastAccessedAt: Double
+}
+
+struct RepoAssociationRecord: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "repoAssociation"
+
+    var id: String
+    var workspaceID: String
+    var repoID: String
+    var worktreePath: String
+    var branchName: String?
 }

@@ -116,4 +116,48 @@ struct WorkspaceFeatureTests {
             state.color = .red
         }
     }
+
+    @Test func addRepoAssociation() async {
+        let store = TestStore(initialState: WorkspaceFeature.State(name: "Test")) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        let assocID = UUID()
+        let repoID = UUID()
+        let assoc = RepoAssociation(
+            id: assocID,
+            repoID: repoID,
+            worktreePath: "/path/to/worktree",
+            branchName: "feature/test"
+        )
+
+        await store.send(.addRepoAssociation(assoc)) { state in
+            state.repoAssociations.append(assoc)
+        }
+    }
+
+    @Test func removeRepoAssociation() async {
+        let assocID = UUID()
+        let repoID = UUID()
+        let assoc = RepoAssociation(
+            id: assocID,
+            repoID: repoID,
+            worktreePath: "/path/to/worktree"
+        )
+
+        var workspace = WorkspaceFeature.State(name: "Test")
+        workspace.repoAssociations.append(assoc)
+
+        let store = TestStore(initialState: workspace) {
+            WorkspaceFeature()
+        } withDependencies: {
+            $0.surfaceManager = SurfaceManager()
+        }
+
+        await store.send(.removeRepoAssociation(assocID)) { state in
+            state.repoAssociations = []
+        }
+    }
 }

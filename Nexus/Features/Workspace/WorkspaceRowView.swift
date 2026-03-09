@@ -5,6 +5,8 @@ struct WorkspaceRowView: View {
     let name: String
     let color: WorkspaceColor
     let paneCount: Int
+    let repoCount: Int
+    let gitStatus: RepoGitStatus
     let isActive: Bool
     let index: Int
 
@@ -19,9 +21,20 @@ struct WorkspaceRowView: View {
                     .font(.system(size: 13, weight: isActive ? .semibold : .regular))
                     .foregroundStyle(isActive ? .primary : .secondary)
 
-                Text("\(paneCount) pane\(paneCount == 1 ? "" : "s")")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+                HStack(spacing: 6) {
+                    Text("\(paneCount) pane\(paneCount == 1 ? "" : "s")")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+
+                    if repoCount > 0 {
+                        HStack(spacing: 2) {
+                            gitStatusDot
+                            Text("\(repoCount)")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
             }
 
             Spacer()
@@ -40,5 +53,17 @@ struct WorkspaceRowView: View {
                 : nil
         )
         .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var gitStatusDot: some View {
+        let dotColor: Color = switch gitStatus {
+        case .unknown: .gray
+        case .clean: .green
+        case .dirty: .red
+        }
+        Circle()
+            .fill(dotColor)
+            .frame(width: 6, height: 6)
     }
 }

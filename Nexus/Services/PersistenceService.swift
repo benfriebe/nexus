@@ -17,25 +17,45 @@ actor PersistenceService {
 
     func save(
         workspaces: IdentifiedArrayOf<WorkspaceFeature.State>,
-        activeWorkspaceID: UUID?
+        activeWorkspaceID: UUID?,
+        repoRegistry: IdentifiedArrayOf<Repo> = []
     ) {
         pendingTask?.cancel()
         pendingTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
-            await self?.writeToDatabase(workspaces: workspaces, activeWorkspaceID: activeWorkspaceID)
+            await self?.writeToDatabase(
+                workspaces: workspaces,
+                activeWorkspaceID: activeWorkspaceID,
+                repoRegistry: repoRegistry
+            )
         }
     }
 
     private func writeToDatabase(
         workspaces: IdentifiedArrayOf<WorkspaceFeature.State>,
-        activeWorkspaceID: UUID?
+        activeWorkspaceID: UUID?,
+        repoRegistry: IdentifiedArrayOf<Repo>
     ) async {
         do {
             try await db.writer.write { db in
-                // Clear and re-insert (fast at Phase 1 scale)
-                try WorkspaceRecord.deleteAll(db)
+                // Clear and re-insert (fast at Phase 2 scale)
+                try RepoAssociationRecord.deleteAll(db)
                 try PaneRecord.deleteAll(db)
+                try WorkspaceRecord.deleteAll(db)
+                try RepoRecord.deleteAll(db)
+
+                // Insert repos
+                for repo in repoRegistry {
+                    let repoRecord = RepoRecord(
+                        id: repo.id.uuidString,
+                        path: repo.path,
+                        name: repo.name,
+                        remoteURL: repo.remoteURL,
+                        lastAccessedAt: repo.lastAccessedAt.timeIntervalSince1970
+                    )
+                    try repoRecord.insert(db)
+                }
 
                 for (index, workspace) in workspaces.enumerated() {
                     let layoutData = try JSONEncoder().encode(workspace.layout)
@@ -44,6 +64,7 @@ actor PersistenceService {
                     let record = WorkspaceRecord(
                         id: workspace.id.uuidString,
                         name: workspace.name,
+                        slug: workspace.slug,
                         color: workspace.color.rawValue,
                         layoutJSON: layoutJSON,
                         focusedPaneID: workspace.focusedPaneID?.uuidString,
@@ -65,6 +86,18 @@ actor PersistenceService {
                         )
                         try paneRecord.insert(db)
                     }
+
+                    // Insert repo associations for this workspace
+                    for assoc in workspace.repoAssociations {
+                        let assocRecord = RepoAssociationRecord(
+                            id: assoc.id.uuidString,
+                            workspaceID: workspace.id.uuidString,
+                            repoID: assoc.repoID.uuidString,
+                            worktreePath: assoc.worktreePath,
+                            branchName: assoc.branchName
+                        )
+                        try assocRecord.insert(db)
+                    }
                 }
 
                 // Save active workspace
@@ -81,9 +114,31 @@ actor PersistenceService {
 
     // MARK: - Load
 
-    func load() -> (IdentifiedArrayOf<WorkspaceFeature.State>, activeWorkspaceID: UUID?) {
+    struct LoadResult: Sendable {
+        var workspaces: IdentifiedArrayOf<WorkspaceFeature.State>
+        var activeWorkspaceID: UUID?
+        var repoRegistry: IdentifiedArrayOf<Repo>
+    }
+
+    func load() -> LoadResult {
         do {
             return try db.writer.read { db in
+                // Load repos
+                let repoRecords = try RepoRecord.fetchAll(db)
+                var repoRegistry = IdentifiedArrayOf<Repo>()
+                for rr in repoRecords {
+                    guard let repoID = UUID(uuidString: rr.id) else { continue }
+                    let repo = Repo(
+                        id: repoID,
+                        path: rr.path,
+                        name: rr.name,
+                        remoteURL: rr.remoteURL,
+                        lastAccessedAt: Date(timeIntervalSince1970: rr.lastAccessedAt)
+                    )
+                    repoRegistry.append(repo)
+                }
+
+                // Load workspaces
                 let workspaceRecords = try WorkspaceRecord
                     .order(Column("sortOrder"))
                     .fetchAll(db)
@@ -111,6 +166,24 @@ actor PersistenceService {
                         panes.append(pane)
                     }
 
+                    // Load repo associations for this workspace
+                    let assocRecords = try RepoAssociationRecord
+                        .filter(Column("workspaceID") == record.id)
+                        .fetchAll(db)
+
+                    var repoAssociations = IdentifiedArrayOf<RepoAssociation>()
+                    for ar in assocRecords {
+                        guard let assocID = UUID(uuidString: ar.id),
+                              let repoID = UUID(uuidString: ar.repoID) else { continue }
+                        let assoc = RepoAssociation(
+                            id: assocID,
+                            repoID: repoID,
+                            worktreePath: ar.worktreePath,
+                            branchName: ar.branchName
+                        )
+                        repoAssociations.append(assoc)
+                    }
+
                     let layout: PaneLayout
                     if let data = record.layoutJSON.data(using: .utf8) {
                         layout = (try? JSONDecoder().decode(PaneLayout.self, from: data)) ?? .empty
@@ -121,13 +194,20 @@ actor PersistenceService {
                     let color = WorkspaceColor(rawValue: record.color) ?? .blue
                     let focusedID = record.focusedPaneID.flatMap(UUID.init)
 
+                    // Generate slug for legacy workspaces that don't have one
+                    let slug = record.slug.isEmpty
+                        ? WorkspaceFeature.State.makeSlug(from: record.name, id: wsID)
+                        : record.slug
+
                     let workspace = WorkspaceFeature.State(
                         id: wsID,
                         name: record.name,
+                        slug: slug,
                         color: color,
                         panes: panes,
                         layout: layout,
                         focusedPaneID: focusedID,
+                        repoAssociations: repoAssociations,
                         createdAt: Date(timeIntervalSince1970: record.createdAt),
                         lastAccessedAt: Date(timeIntervalSince1970: record.lastAccessedAt)
                     )
@@ -140,11 +220,15 @@ actor PersistenceService {
                     .value
                 let activeID = activeIDStr.flatMap(UUID.init)
 
-                return (workspaces, activeID)
+                return LoadResult(
+                    workspaces: workspaces,
+                    activeWorkspaceID: activeID,
+                    repoRegistry: repoRegistry
+                )
             }
         } catch {
             print("PersistenceService: load failed — \(error)")
-            return ([], nil)
+            return LoadResult(workspaces: [], activeWorkspaceID: nil, repoRegistry: [])
         }
     }
 }

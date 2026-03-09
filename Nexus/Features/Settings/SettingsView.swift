@@ -2,6 +2,28 @@ import ComposableArchitecture
 import SwiftUI
 
 struct SettingsView: View {
+    let store: StoreOf<AppReducer>
+
+    var body: some View {
+        WithPerceptionTracking {
+            TabView {
+                AppearanceSettingsView(store: store.scope(state: \.settings, action: \.settings))
+                    .tabItem {
+                        Label("Appearance", systemImage: "paintbrush")
+                    }
+
+                RepoRegistryView(store: store)
+                    .tabItem {
+                        Label("Repositories", systemImage: "externaldrive")
+                    }
+            }
+            .frame(width: 500, height: 400)
+        }
+    }
+}
+
+/// Appearance settings tab (extracted from original SettingsView).
+private struct AppearanceSettingsView: View {
     @Bindable var store: StoreOf<SettingsFeature>
 
     var body: some View {
@@ -27,7 +49,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 400)
         .onAppear {
             store.send(.loadSettings)
         }

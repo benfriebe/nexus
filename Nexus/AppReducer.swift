@@ -10,6 +10,9 @@ struct AppReducer {
         var isSidebarVisible: Bool = true
         var isNewWorkspaceSheetPresented: Bool = false
         var settings = SettingsFeature.State()
+        var repoRegistry: IdentifiedArrayOf<Repo> = []
+        var gitStatuses: [UUID: RepoGitStatus] = [:]
+        var isInspectorVisible: Bool = false
 
         var activeWorkspace: WorkspaceFeature.State? {
             guard let id = activeWorkspaceID else { return nil }
@@ -29,14 +32,42 @@ struct AppReducer {
         case showNewWorkspaceSheet
         case dismissNewWorkspaceSheet
         case persistState
-        case stateLoaded(IdentifiedArrayOf<WorkspaceFeature.State>, activeWorkspaceID: UUID?)
+        case stateLoaded(
+            IdentifiedArrayOf<WorkspaceFeature.State>,
+            activeWorkspaceID: UUID?,
+            repoRegistry: IdentifiedArrayOf<Repo>
+        )
         case workspaces(IdentifiedActionOf<WorkspaceFeature>)
         case settings(SettingsFeature.Action)
+
+        // Repo Registry
+        case scanForRepos(rootPath: String)
+        case scanCompleted([ScannedRepo])
+        case addRepo(path: String, name: String?)
+        case repoAdded(Repo)
+        case removeRepo(UUID)
+        case renameRepo(id: UUID, name: String)
+
+        // Worktree Operations
+        case createWorktree(workspaceID: UUID, repoID: UUID, worktreeName: String, branchName: String)
+        case worktreeCreated(workspaceID: UUID, repoID: UUID, worktreePath: String, branchName: String)
+        case worktreeCreationFailed(workspaceID: UUID, error: String)
+        case removeWorktreeAssociation(workspaceID: UUID, associationID: UUID, deleteWorktree: Bool)
+
+        // Inspector + Git Status
+        case toggleInspector
+        case refreshGitStatus
+        case gitStatusUpdated(associationID: UUID, status: RepoGitStatus)
+        case _startGitStatusTimer
     }
 
     @Dependency(\.surfaceManager) var surfaceManager
     @Dependency(\.persistenceService) var persistenceService
+    @Dependency(\.gitService) var gitService
     @Dependency(\.uuid) var uuid
+    @Dependency(\.continuousClock) var clock
+
+    private enum GitStatusTimerID: Hashable { case timer }
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -44,8 +75,12 @@ struct AppReducer {
             case .appLaunched:
                 return .merge(
                     .run { send in
-                        let (workspaces, activeID) = await persistenceService.load()
-                        await send(.stateLoaded(workspaces, activeWorkspaceID: activeID))
+                        let result = await persistenceService.load()
+                        await send(.stateLoaded(
+                            result.workspaces,
+                            activeWorkspaceID: result.activeWorkspaceID,
+                            repoRegistry: result.repoRegistry
+                        ))
                     },
                     .send(.settings(.loadSettings))
                 )
@@ -91,7 +126,10 @@ struct AppReducer {
             case .setActiveWorkspace(let id):
                 state.activeWorkspaceID = id
                 state.workspaces[id: id]?.lastAccessedAt = Date()
-                return .send(.persistState)
+                return .merge(
+                    .send(.persistState),
+                    .send(.refreshGitStatus)
+                )
 
             case .switchToWorkspaceByIndex(let index):
                 guard index >= 0, index < state.workspaces.count else { return .none }
@@ -127,37 +165,192 @@ struct AppReducer {
             case .persistState:
                 let workspaces = state.workspaces
                 let activeID = state.activeWorkspaceID
+                let repos = state.repoRegistry
                 return .run { _ in
-                    await persistenceService.save(workspaces: workspaces, activeWorkspaceID: activeID)
+                    await persistenceService.save(
+                        workspaces: workspaces,
+                        activeWorkspaceID: activeID,
+                        repoRegistry: repos
+                    )
                 }
 
-            case .stateLoaded(let workspaces, let activeID):
+            case .stateLoaded(let workspaces, let activeID, let repoRegistry):
                 if workspaces.isEmpty {
                     // First launch — create a default workspace
                     return .send(.createWorkspace(name: "Default", color: .blue))
                 }
                 state.workspaces = workspaces
                 state.activeWorkspaceID = activeID ?? workspaces.first?.id
+                state.repoRegistry = repoRegistry
 
                 // Create surfaces for all panes in all workspaces
-                return .run { _ in
-                    for workspace in workspaces {
-                        for pane in workspace.panes {
-                            await surfaceManager.createSurface(
-                                paneID: pane.id,
-                                workingDirectory: pane.workingDirectory
-                            )
+                return .merge(
+                    .run { _ in
+                        for workspace in workspaces {
+                            for pane in workspace.panes {
+                                await surfaceManager.createSurface(
+                                    paneID: pane.id,
+                                    workingDirectory: pane.workingDirectory
+                                )
+                            }
                         }
-                    }
-                }
+                    },
+                    .send(.refreshGitStatus),
+                    .send(._startGitStatusTimer)
+                )
 
             case .workspaces:
                 // Child workspace actions — persist after mutations
                 return .send(.persistState)
 
             case .settings:
-                // Handled by scoped SettingsFeature reducer
                 return .none
+
+            // MARK: - Repo Registry
+
+            case .scanForRepos(let rootPath):
+                return .run { send in
+                    let repos = try await gitService.scanForRepos(rootPath, 3)
+                    await send(.scanCompleted(repos))
+                }
+
+            case .scanCompleted(let scannedRepos):
+                var effects: [Effect<Action>] = []
+                for scanned in scannedRepos {
+                    // Skip repos already in registry
+                    if state.repoRegistry.contains(where: { $0.path == scanned.path }) {
+                        continue
+                    }
+                    effects.append(.send(.addRepo(path: scanned.path, name: scanned.name)))
+                }
+                return effects.isEmpty ? .none : .merge(effects)
+
+            case .addRepo(let path, let name):
+                // Deduplicate by path
+                guard !state.repoRegistry.contains(where: { $0.path == path }) else {
+                    return .none
+                }
+                let repoID = uuid()
+                return .run { send in
+                    let remoteURL = try? await gitService.getRemoteURL(path)
+                    let repo = Repo(
+                        id: repoID,
+                        path: path,
+                        name: name,
+                        remoteURL: remoteURL
+                    )
+                    await send(.repoAdded(repo))
+                }
+
+            case .repoAdded(let repo):
+                state.repoRegistry.append(repo)
+                return .send(.persistState)
+
+            case .removeRepo(let id):
+                state.repoRegistry.remove(id: id)
+                // Cascade-remove associations from all workspaces
+                for wsIndex in state.workspaces.indices {
+                    state.workspaces[wsIndex].repoAssociations.removeAll(where: { $0.repoID == id })
+                }
+                return .send(.persistState)
+
+            case .renameRepo(let id, let name):
+                state.repoRegistry[id: id]?.name = name
+                return .send(.persistState)
+
+            // MARK: - Worktree Operations
+
+            case .createWorktree(let workspaceID, let repoID, let worktreeName, let branchName):
+                guard let repo = state.repoRegistry[id: repoID],
+                      let workspace = state.workspaces[id: workspaceID] else { return .none }
+                let home = NSHomeDirectory()
+                let worktreePath = "\(home)/nexus/workspaces/\(workspace.slug)/\(worktreeName)"
+                return .run { send in
+                    do {
+                        try await gitService.createWorktree(repo.path, worktreePath, branchName)
+                        await send(.worktreeCreated(
+                            workspaceID: workspaceID,
+                            repoID: repoID,
+                            worktreePath: worktreePath,
+                            branchName: branchName
+                        ))
+                    } catch {
+                        await send(.worktreeCreationFailed(
+                            workspaceID: workspaceID,
+                            error: error.localizedDescription
+                        ))
+                    }
+                }
+
+            case .worktreeCreated(let workspaceID, let repoID, let worktreePath, let branchName):
+                let assoc = RepoAssociation(
+                    id: uuid(),
+                    repoID: repoID,
+                    worktreePath: worktreePath,
+                    branchName: branchName
+                )
+                state.workspaces[id: workspaceID]?.repoAssociations.append(assoc)
+                return .merge(
+                    .send(.persistState),
+                    .send(.refreshGitStatus)
+                )
+
+            case .worktreeCreationFailed:
+                // UI can observe this for error display
+                return .none
+
+            case .removeWorktreeAssociation(let workspaceID, let associationID, let deleteWorktree):
+                guard let workspace = state.workspaces[id: workspaceID],
+                      let assoc = workspace.repoAssociations[id: associationID],
+                      let repo = state.repoRegistry[id: assoc.repoID] else { return .none }
+
+                state.workspaces[id: workspaceID]?.repoAssociations.remove(id: associationID)
+                state.gitStatuses.removeValue(forKey: associationID)
+
+                if deleteWorktree {
+                    return .merge(
+                        .run { _ in
+                            try? await gitService.removeWorktree(repo.path, assoc.worktreePath)
+                        },
+                        .send(.persistState)
+                    )
+                }
+                return .send(.persistState)
+
+            // MARK: - Inspector + Git Status
+
+            case .toggleInspector:
+                state.isInspectorVisible.toggle()
+                if state.isInspectorVisible {
+                    return .send(.refreshGitStatus)
+                }
+                return .none
+
+            case .refreshGitStatus:
+                guard let activeID = state.activeWorkspaceID,
+                      let workspace = state.workspaces[id: activeID] else { return .none }
+
+                let associations = workspace.repoAssociations
+                guard !associations.isEmpty else { return .none }
+
+                return .run { send in
+                    for assoc in associations {
+                        let status = (try? await gitService.getStatus(assoc.worktreePath)) ?? .unknown
+                        await send(.gitStatusUpdated(associationID: assoc.id, status: status))
+                    }
+                }
+
+            case .gitStatusUpdated(let associationID, let status):
+                state.gitStatuses[associationID] = status
+                return .none
+
+            case ._startGitStatusTimer:
+                return .run { send in
+                    for await _ in clock.timer(interval: .seconds(30)) {
+                        await send(.refreshGitStatus)
+                    }
+                }
+                .cancellable(id: GitStatusTimerID.timer, cancelInFlight: true)
             }
         }
         .forEach(\.workspaces, action: \.workspaces) {

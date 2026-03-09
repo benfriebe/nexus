@@ -7,10 +7,12 @@ struct WorkspaceFeature {
     struct State: Equatable, Identifiable, Sendable {
         let id: UUID
         var name: String
+        var slug: String
         var color: WorkspaceColor
         var panes: IdentifiedArrayOf<Pane>
         var layout: PaneLayout
         var focusedPaneID: UUID?
+        var repoAssociations: IdentifiedArrayOf<RepoAssociation> = []
         var createdAt: Date
         var lastAccessedAt: Date
 
@@ -22,6 +24,7 @@ struct WorkspaceFeature {
         ) {
             self.id = id
             self.name = name
+            self.slug = Self.makeSlug(from: name, id: id)
             self.color = color
             self.createdAt = createdAt
             self.lastAccessedAt = createdAt
@@ -37,21 +40,36 @@ struct WorkspaceFeature {
         init(
             id: UUID,
             name: String,
+            slug: String,
             color: WorkspaceColor,
             panes: IdentifiedArrayOf<Pane>,
             layout: PaneLayout,
             focusedPaneID: UUID?,
+            repoAssociations: IdentifiedArrayOf<RepoAssociation> = [],
             createdAt: Date,
             lastAccessedAt: Date
         ) {
             self.id = id
             self.name = name
+            self.slug = slug
             self.color = color
             self.panes = panes
             self.layout = layout
             self.focusedPaneID = focusedPaneID
+            self.repoAssociations = repoAssociations
             self.createdAt = createdAt
             self.lastAccessedAt = lastAccessedAt
+        }
+
+        /// Generate a filesystem-safe slug from a display name.
+        /// Appends a short ID suffix to guarantee uniqueness.
+        static func makeSlug(from name: String, id: UUID) -> String {
+            let base = name
+                .lowercased()
+                .replacing(/[^a-z0-9]+/, with: "-")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+            let suffix = id.uuidString.prefix(8).lowercased()
+            return base.isEmpty ? suffix : "\(base)-\(suffix)"
         }
     }
 
@@ -59,6 +77,7 @@ struct WorkspaceFeature {
         case rename(String)
         case setColor(WorkspaceColor)
         case createPane
+        case splitPaneAtPath(String)
         case splitPane(direction: PaneLayout.SplitDirection, sourcePaneID: UUID?)
         case closePane(UUID)
         case focusPane(UUID)
@@ -68,6 +87,8 @@ struct WorkspaceFeature {
         case paneTitleChanged(paneID: UUID, title: String)
         case paneDirectoryChanged(paneID: UUID, directory: String)
         case paneProcessTerminated(paneID: UUID)
+        case addRepoAssociation(RepoAssociation)
+        case removeRepoAssociation(UUID)
     }
 
     @Dependency(\.surfaceManager) var surfaceManager
@@ -92,6 +113,30 @@ struct WorkspaceFeature {
                 state.panes.append(newPane)
                 state.layout = .leaf(newPaneID)
                 state.focusedPaneID = newPaneID
+                let opacity = ghosttyConfig.backgroundOpacity
+                return .run { _ in
+                    await surfaceManager.createSurface(
+                        paneID: newPaneID,
+                        workingDirectory: newPane.workingDirectory,
+                        backgroundOpacity: opacity
+                    )
+                }
+
+            case .splitPaneAtPath(let path):
+                guard let sourceID = state.focusedPaneID else { return .none }
+
+                let newPaneID = uuid()
+                let newPane = Pane(id: newPaneID, workingDirectory: path)
+
+                let (newLayout, _) = state.layout.splitting(
+                    paneID: sourceID,
+                    direction: .horizontal,
+                    newPaneID: newPaneID
+                )
+                state.layout = newLayout
+                state.panes.append(newPane)
+                state.focusedPaneID = newPaneID
+
                 let opacity = ghosttyConfig.backgroundOpacity
                 return .run { _ in
                     await surfaceManager.createSurface(
@@ -178,6 +223,14 @@ struct WorkspaceFeature {
             case .paneProcessTerminated(let paneID):
                 // Close the pane when its shell exits
                 return .send(.closePane(paneID))
+
+            case .addRepoAssociation(let assoc):
+                state.repoAssociations.append(assoc)
+                return .none
+
+            case .removeRepoAssociation(let id):
+                state.repoAssociations.remove(id: id)
+                return .none
             }
         }
     }
