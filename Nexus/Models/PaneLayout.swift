@@ -92,6 +92,66 @@ indirect enum PaneLayout: Equatable, Codable, Sendable {
         return (replacing(paneID: paneID, with: splitNode), newPaneID)
     }
 
+    // MARK: - Drop Zone
+
+    enum DropZone: Equatable, Sendable {
+        case top, bottom, left, right
+
+        var splitDirection: SplitDirection {
+            switch self {
+            case .left, .right: return .horizontal
+            case .top, .bottom: return .vertical
+            }
+        }
+
+        /// Whether the dragged pane goes first in the new split.
+        var isFirst: Bool {
+            switch self {
+            case .left, .top: return true
+            case .right, .bottom: return false
+            }
+        }
+
+        /// Determine drop zone from cursor position within a rect (closest edge).
+        static func calculate(at point: CGPoint, in rect: CGRect) -> DropZone {
+            let dx = point.x - rect.midX
+            let dy = point.y - rect.midY
+            let hw = rect.width / 2
+            let hh = rect.height / 2
+
+            // Normalize distances to [-1, 1] range
+            let nx = hw > 0 ? dx / hw : 0
+            let ny = hh > 0 ? dy / hh : 0
+
+            if abs(nx) > abs(ny) {
+                return nx > 0 ? .right : .left
+            } else {
+                return ny > 0 ? .bottom : .top
+            }
+        }
+    }
+
+    // MARK: - Move Pane
+
+    /// Move a pane to be adjacent to another pane in the given drop zone.
+    func movingPane(_ paneID: UUID, toAdjacentOf targetID: UUID, zone: DropZone) -> PaneLayout {
+        guard paneID != targetID else { return self }
+
+        // Remove dragged pane — tree collapses automatically
+        let withoutPane = removing(paneID: paneID)
+
+        // Build the new split node
+        let direction = zone.splitDirection
+        let paneLeaf = PaneLayout.leaf(paneID)
+        let targetLeaf = PaneLayout.leaf(targetID)
+        let splitNode: PaneLayout = zone.isFirst
+            ? .split(direction, ratio: 0.5, first: paneLeaf, second: targetLeaf)
+            : .split(direction, ratio: 0.5, first: targetLeaf, second: paneLeaf)
+
+        // Replace target leaf with the new split
+        return withoutPane.replacing(paneID: targetID, with: splitNode)
+    }
+
     // MARK: - Focus Navigation
 
     func nextPaneID(after currentID: UUID) -> UUID? {

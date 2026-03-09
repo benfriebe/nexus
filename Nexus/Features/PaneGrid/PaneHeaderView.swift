@@ -10,6 +10,10 @@ struct PaneHeaderView: View {
     let onSplitHorizontal: () -> Void
     let onSplitVertical: () -> Void
     let onClose: () -> Void
+    var onDragChanged: ((CGPoint) -> Void)?
+    var onDragEnded: (() -> Void)?
+
+    @State private var isDragging = false
 
     var body: some View {
         HStack(spacing: 4) {
@@ -62,6 +66,19 @@ struct PaneHeaderView: View {
         .padding(.vertical, 2)
         .contentShape(Rectangle())
         .onTapGesture { onFocus() }
+        .gesture(
+            DragGesture(minimumDistance: 8, coordinateSpace: .named("paneGrid"))
+                .onChanged { value in
+                    if !isDragging {
+                        isDragging = true
+                    }
+                    onDragChanged?(value.location)
+                }
+                .onEnded { _ in
+                    isDragging = false
+                    onDragEnded?()
+                }
+        )
         .background {
             ZStack {
                 Color(nsColor: .windowBackgroundColor)

@@ -87,6 +87,7 @@ struct WorkspaceFeature {
         case paneTitleChanged(paneID: UUID, title: String)
         case paneDirectoryChanged(paneID: UUID, directory: String)
         case paneProcessTerminated(paneID: UUID)
+        case movePane(paneID: UUID, targetPaneID: UUID, zone: PaneLayout.DropZone)
         case addRepoAssociation(RepoAssociation)
         case removeRepoAssociation(UUID)
     }
@@ -223,6 +224,15 @@ struct WorkspaceFeature {
             case .paneProcessTerminated(let paneID):
                 // Close the pane when its shell exits
                 return .send(.closePane(paneID))
+
+            case .movePane(let paneID, let targetPaneID, let zone):
+                guard state.panes[id: paneID] != nil,
+                      state.panes[id: targetPaneID] != nil else { return .none }
+                state.layout = state.layout.movingPane(
+                    paneID, toAdjacentOf: targetPaneID, zone: zone
+                )
+                state.focusedPaneID = paneID
+                return .none
 
             case .addRepoAssociation(let assoc):
                 state.repoAssociations.append(assoc)

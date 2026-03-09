@@ -14,6 +14,12 @@ struct PaneGridView: View {
     let onClosePane: (UUID) -> Void
     let onFocusPane: (UUID) -> Void
     let onUpdateRatio: (UUID, Double) -> Void
+    var onMovePane: ((UUID, UUID, PaneLayout.DropZone) -> Void)?
+
+    @State private var dragSourcePaneID: UUID?
+    @State private var dragTargetPaneID: UUID?
+    @State private var dragDropZone: PaneLayout.DropZone?
+    @State private var gridSize: CGSize = .zero
 
     var body: some View {
         if layout.isEmpty {
@@ -35,7 +41,19 @@ struct PaneGridView: View {
                     ForEach(dividers) { info in
                         dividerView(info: info)
                     }
+                    // Drop zone overlay
+                    if let targetID = dragTargetPaneID,
+                       let zone = dragDropZone,
+                       let targetFrame = frames[targetID] {
+                        dropZoneOverlay(frame: targetFrame, zone: zone)
+                    }
                 }
+            }
+            .coordinateSpace(name: "paneGrid")
+            .onGeometryChange(for: CGSize.self) {
+                $0.size
+            } action: { newSize in
+                gridSize = newSize
             }
             // Prevent implicit animations from interfering with
             // NSView re-parenting during layout transitions.
@@ -51,7 +69,36 @@ struct PaneGridView: View {
                 onFocus: { onFocusPane(pane.id) },
                 onSplitHorizontal: { onSplitPane(pane.id, .horizontal) },
                 onSplitVertical: { onSplitPane(pane.id, .vertical) },
-                onClose: { onClosePane(pane.id) }
+                onClose: { onClosePane(pane.id) },
+                onDragChanged: { point in
+                    dragSourcePaneID = pane.id
+                    let bounds = CGRect(origin: .zero, size: gridSize)
+                    let frames = layout.paneFrames(in: bounds)
+                    // Hit-test: find which pane contains the cursor
+                    var hitTarget: UUID?
+                    for (id, rect) in frames {
+                        if id != pane.id && rect.contains(point) {
+                            hitTarget = id
+                            break
+                        }
+                    }
+                    dragTargetPaneID = hitTarget
+                    if let hitTarget, let rect = frames[hitTarget] {
+                        dragDropZone = PaneLayout.DropZone.calculate(at: point, in: rect)
+                    } else {
+                        dragDropZone = nil
+                    }
+                },
+                onDragEnded: {
+                    if let source = dragSourcePaneID,
+                       let target = dragTargetPaneID,
+                       let zone = dragDropZone {
+                        onMovePane?(source, target, zone)
+                    }
+                    dragSourcePaneID = nil
+                    dragTargetPaneID = nil
+                    dragDropZone = nil
+                }
             )
 
             SurfaceContainerView(
@@ -64,6 +111,7 @@ struct PaneGridView: View {
             pane.id == focusedPaneID ? Color.accentColor.opacity(0.4) : Color.clear,
             width: 1
         )
+        .opacity(dragSourcePaneID == pane.id ? 0.5 : 1.0)
         .frame(width: frame.width, height: frame.height)
         .offset(x: frame.origin.x, y: frame.origin.y)
     }
@@ -76,6 +124,26 @@ struct PaneGridView: View {
         }
         .frame(width: info.rect.width, height: info.rect.height)
         .offset(x: info.rect.origin.x, y: info.rect.origin.y)
+    }
+
+    private func dropZoneOverlay(frame: CGRect, zone: PaneLayout.DropZone) -> some View {
+        let overlayRect: CGRect = switch zone {
+        case .left:
+            CGRect(x: frame.minX, y: frame.minY, width: frame.width / 2, height: frame.height)
+        case .right:
+            CGRect(x: frame.midX, y: frame.minY, width: frame.width / 2, height: frame.height)
+        case .top:
+            CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height / 2)
+        case .bottom:
+            CGRect(x: frame.minX, y: frame.midY, width: frame.width, height: frame.height / 2)
+        }
+
+        return RoundedRectangle(cornerRadius: 4)
+            .fill(Color.accentColor.opacity(0.2))
+            .border(Color.accentColor.opacity(0.5), width: 2)
+            .frame(width: overlayRect.width, height: overlayRect.height)
+            .offset(x: overlayRect.origin.x, y: overlayRect.origin.y)
+            .allowsHitTesting(false)
     }
 
     private var emptyView: some View {

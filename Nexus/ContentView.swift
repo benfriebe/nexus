@@ -44,6 +44,12 @@ struct ContentView: View {
                                 id: activeID,
                                 action: .updateSplitRatio(firstChildPaneID: firstChildPaneID, ratio: ratio)
                             )))
+                        },
+                        onMovePane: { paneID, targetPaneID, zone in
+                            store.send(.workspaces(.element(
+                                id: activeID,
+                                action: .movePane(paneID: paneID, targetPaneID: targetPaneID, zone: zone)
+                            )))
                         }
                     )
                 } else {
