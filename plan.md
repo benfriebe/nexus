@@ -426,7 +426,6 @@ This is a solo build. The plan is sequenced so each phase ships something useful
 ### Phase 3 — Agent Awareness + Notifications
 **Goal**: Nexus knows when agents are running and when they need you.
 
-- Pane type tagging (agent:claude, agent:codex, shell, etc.)
 - PTY stream watcher: OSC escape sequence parsing
 - Prompt pattern matching (configurable regex)
 - Silence + cursor detection (low-confidence fallback)
