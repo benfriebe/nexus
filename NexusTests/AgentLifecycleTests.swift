@@ -135,4 +135,51 @@ struct AgentLifecycleTests {
         // Should produce no child effects — unknown pane
         await store.send(.socketEvent(paneID: unknownPaneID, event: .stopped))
     }
+
+    // MARK: - Desktop Notifications
+
+    @Test func desktopNotificationForUnknownPaneIsIgnored() async {
+        let paneID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let wsID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
+        let unknownPaneID = UUID(uuidString: "99999999-9999-9999-9999-999999999999")!
+
+        let ws = WorkspaceFeature.State(
+            id: wsID, name: "WS", slug: "ws", color: .blue,
+            panes: [Pane(id: paneID)], layout: .leaf(paneID),
+            focusedPaneID: paneID, createdAt: Date(), lastAccessedAt: Date()
+        )
+
+        let store = makeAppStore(
+            workspaces: [ws],
+            activeWorkspaceID: wsID
+        )
+
+        // Unknown pane — no effect
+        await store.send(.desktopNotification(paneID: unknownPaneID, title: "Test", body: "msg"))
+    }
+
+    @Test func agentErrorAlwaysNotifies() async {
+        let paneID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let wsID = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
+
+        let ws = WorkspaceFeature.State(
+            id: wsID, name: "WS", slug: "ws", color: .blue,
+            panes: [Pane(id: paneID)], layout: .leaf(paneID),
+            focusedPaneID: paneID, createdAt: Date(), lastAccessedAt: Date()
+        )
+
+        let store = makeAppStore(
+            workspaces: [ws],
+            activeWorkspaceID: wsID
+        )
+
+        // Error events always fire a notification (even if focused)
+        await store.send(.socketEvent(paneID: paneID, event: .error(message: "crash")))
+
+        await store.receive(
+            .workspaces(.element(id: wsID, action: .agentStatusChanged(paneID: paneID, event: .error(message: "crash"))))
+        ) { state in
+            state.workspaces[id: wsID]?.panes[id: paneID]?.status = .waitingForInput
+        }
+    }
 }

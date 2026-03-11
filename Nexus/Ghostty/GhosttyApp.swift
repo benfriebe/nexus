@@ -20,6 +20,9 @@ final class GhosttyApp {
     /// Notification posted when a surface should close.
     /// userInfo: ["surface": ghostty_surface_t]
     static let surfaceCloseNotification = Notification.Name("GhosttyApp.surfaceClose")
+    /// Notification posted when a surface sends an OSC desktop notification.
+    /// userInfo: ["surface": ghostty_surface_t, "title": String, "body": String]
+    static let desktopNotification = Notification.Name("GhosttyApp.desktopNotification")
 
     private init() {}
 
@@ -131,6 +134,23 @@ final class GhosttyApp {
                     userInfo: [
                         "surface": surface as Any,
                         "pwd": pwd,
+                    ]
+                )
+            }
+            return true
+
+        case GHOSTTY_ACTION_DESKTOP_NOTIFICATION:
+            let title = action.action.desktop_notification.title.flatMap { String(cString: $0) } ?? ""
+            let body = action.action.desktop_notification.body.flatMap { String(cString: $0) } ?? ""
+            let surface = target.tag == GHOSTTY_TARGET_SURFACE ? target.target.surface : nil
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: Self.desktopNotification,
+                    object: nil,
+                    userInfo: [
+                        "surface": surface as Any,
+                        "title": title,
+                        "body": body,
                     ]
                 )
             }

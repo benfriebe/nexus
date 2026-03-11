@@ -1,3 +1,4 @@
+import AppKit
 import ComposableArchitecture
 import Foundation
 
@@ -47,6 +48,9 @@ struct AppReducer {
         case surfaceTitleChanged(paneID: UUID, title: String)
         case surfaceDirectoryChanged(paneID: UUID, directory: String)
 
+        // Desktop notifications (OSC 9/99/777)
+        case desktopNotification(paneID: UUID, title: String, body: String)
+
         // Repo Registry
         case scanForRepos(rootPath: String)
         case scanCompleted([ScannedRepo])
@@ -72,6 +76,7 @@ struct AppReducer {
     @Dependency(\.persistenceService) var persistenceService
     @Dependency(\.gitService) var gitService
     @Dependency(\.socketServer) var socketServer
+    @Dependency(\.notificationService) var notificationService
     @Dependency(\.uuid) var uuid
     @Dependency(\.continuousClock) var clock
 
@@ -221,10 +226,47 @@ struct AppReducer {
                 guard let workspace = state.workspaces.first(where: { ws in
                     ws.panes[id: paneID] != nil
                 }) else { return .none }
-                return .send(.workspaces(.element(
-                    id: workspace.id,
-                    action: .agentStatusChanged(paneID: paneID, event: event)
-                )))
+
+                // Fire desktop notification for agent events (unless pane is focused)
+                let isFocused = state.activeWorkspaceID == workspace.id
+                    && workspace.focusedPaneID == paneID
+                let notifService = notificationService
+                var effects: [Effect<Action>] = [
+                    .send(.workspaces(.element(
+                        id: workspace.id,
+                        action: .agentStatusChanged(paneID: paneID, event: event)
+                    )))
+                ]
+                switch event {
+                case .stopped:
+                    if !isFocused || !NSApp.isActive {
+                        let title = workspace.panes[id: paneID]?.title ?? workspace.name
+                        effects.append(.run { _ in
+                            notifService.post(
+                                title: title,
+                                body: "Agent is waiting for input",
+                                paneID: paneID
+                            )
+                        })
+                    }
+                case .error(let message):
+                    effects.append(.run { _ in
+                        notifService.post(
+                            title: "Agent Error",
+                            body: message,
+                            paneID: paneID
+                        )
+                    })
+                case .notification(let title, let body):
+                    if !isFocused || !NSApp.isActive {
+                        effects.append(.run { _ in
+                            notifService.post(title: title, body: body, paneID: paneID)
+                        })
+                    }
+                case .started:
+                    break
+                }
+                return .merge(effects)
 
             // MARK: - Cross-Workspace Surface Notifications
 
@@ -245,6 +287,21 @@ struct AppReducer {
                     id: workspace.id,
                     action: .paneDirectoryChanged(paneID: paneID, directory: directory)
                 )))
+
+            // MARK: - Desktop Notifications (OSC)
+
+            case .desktopNotification(let paneID, let title, let body):
+                // Suppress if this pane is focused and app is active
+                if let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil }),
+                   state.activeWorkspaceID == workspace.id,
+                   workspace.focusedPaneID == paneID,
+                   NSApp.isActive {
+                    return .none
+                }
+                let notifService = notificationService
+                return .run { _ in
+                    notifService.post(title: title, body: body, paneID: paneID)
+                }
 
             // MARK: - Repo Registry
 

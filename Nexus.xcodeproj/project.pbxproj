@@ -12,6 +12,7 @@
 		0CFAA877D93376BE849A45BF /* SettingsFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF5602EB5926D7D5AE4425F2 /* SettingsFeature.swift */; };
 		103C1B62EE40C88B59C81705 /* Pane.swift in Sources */ = {isa = PBXBuildFile; fileRef = B93167BDC0E7772D231F99E8 /* Pane.swift */; };
 		1B5BABDA615D3462A789355D /* PaneType.swift in Sources */ = {isa = PBXBuildFile; fileRef = C047E92FE7823AD19A207A82 /* PaneType.swift */; };
+		1CE4C114A9AB99D4105A5FE9 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAE7A06EA24E4C7B959043BD /* NotificationService.swift */; };
 		23626EE07F58122AEE57E28E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AA084843197E68484EDF41F /* SettingsView.swift */; };
 		23B7A4375CFBA2A0AF0BD4B5 /* WorkspaceFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5BE660397D7CA67D909D988 /* WorkspaceFeatureTests.swift */; };
 		2CB3848DCA20C5F575116C33 /* PaneHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F5C2505807A0297370DC70D /* PaneHeaderView.swift */; };
@@ -104,6 +105,7 @@
 		AD73E318BB132E80DF737777 /* WorkspaceInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceInspectorView.swift; sourceTree = "<group>"; };
 		B43F76D69B7E837A41C13448 /* GitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitService.swift; sourceTree = "<group>"; };
 		B93167BDC0E7772D231F99E8 /* Pane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pane.swift; sourceTree = "<group>"; };
+		BAE7A06EA24E4C7B959043BD /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		BC14CB4D58153A7113FD26F8 /* GhosttyConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyConfig.swift; sourceTree = "<group>"; };
 		BF5602EB5926D7D5AE4425F2 /* SettingsFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsFeature.swift; sourceTree = "<group>"; };
 		C047E92FE7823AD19A207A82 /* PaneType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneType.swift; sourceTree = "<group>"; };
@@ -163,6 +165,7 @@
 			children = (
 				A6C7D51FECC970E31659DFBD /* DatabaseService.swift */,
 				B43F76D69B7E837A41C13448 /* GitService.swift */,
+				BAE7A06EA24E4C7B959043BD /* NotificationService.swift */,
 				55BE5E732B98707B64C6CCC1 /* PersistenceService.swift */,
 				52F0C3330B816C66BB134635 /* SocketServer.swift */,
 				5C18E2F1249EAC70CE79F613 /* SurfaceManager.swift */,
@@ -413,6 +416,7 @@
 				375C8BCC9F11700FEBFAC68D /* NewWorkspaceSheet.swift in Sources */,
 				56A1FC9C1A5285DA29A904AD /* NexusApp.swift in Sources */,
 				665EBD0DA670A820E57863DE /* NexusCommands.swift in Sources */,
+				1CE4C114A9AB99D4105A5FE9 /* NotificationService.swift in Sources */,
 				103C1B62EE40C88B59C81705 /* Pane.swift in Sources */,
 				EC469F7A77CE8588D4EBFCB2 /* PaneGridView.swift in Sources */,
 				2CB3848DCA20C5F575116C33 /* PaneHeaderView.swift in Sources */,

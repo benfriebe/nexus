@@ -29,6 +29,7 @@ struct NexusApp: App {
                     guard !Self.isTestMode else { return }
 
                     GhosttyApp.shared.start()
+                    NotificationService.liveValue.requestPermission()
 
                     // Populate config dependency from the live ghostty config
                     let config = GhosttyConfigClient.load()

@@ -110,6 +110,13 @@ struct ContentView: View {
                 // Route through AppReducer for cross-workspace support
                 store.send(.surfaceDirectoryChanged(paneID: paneID, directory: pwd))
             }
+            .onReceive(NotificationCenter.default.publisher(for: GhosttyApp.desktopNotification)) { notification in
+                guard let surface = notification.userInfo?["surface"] as? ghostty_surface_t,
+                      let title = notification.userInfo?["title"] as? String,
+                      let body = notification.userInfo?["body"] as? String,
+                      let paneID = surfaceManager.paneID(for: surface) else { return }
+                store.send(.desktopNotification(paneID: paneID, title: title, body: body))
+            }
             .onAppear {
                 // Start socket server and wire events to AppReducer
                 socketServer.onEvent = { paneID, event in
