@@ -29,7 +29,26 @@ struct NexusApp: App {
                     guard !Self.isTestMode else { return }
 
                     GhosttyApp.shared.start()
-                    NotificationService.liveValue.requestPermission()
+
+                    // Notification service — permission + action callback
+                    let notifService = NotificationService.liveValue
+                    notifService.requestPermission()
+                    notifService.onOpenPane = { paneID, workspaceID in
+                        store.send(.setActiveWorkspace(workspaceID))
+                        store.send(.workspaces(.element(id: workspaceID, action: .focusPane(paneID))))
+                    }
+
+                    // Status bar — menu bar icon + popover
+                    let statusBar = StatusBarController.liveValue
+                    statusBar.setup()
+                    statusBar.onSelectPane = { paneID, workspaceID in
+                        store.send(.setActiveWorkspace(workspaceID))
+                        store.send(.workspaces(.element(id: workspaceID, action: .focusPane(paneID))))
+                        NSApp.activate()
+                        if let window = NSApp.windows.first {
+                            window.makeKeyAndOrderFront(nil)
+                        }
+                    }
 
                     // Populate config dependency from the live ghostty config
                     let config = GhosttyConfigClient.load()

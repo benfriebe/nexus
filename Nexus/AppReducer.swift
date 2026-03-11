@@ -70,6 +70,9 @@ struct AppReducer {
         case refreshGitStatus
         case gitStatusUpdated(associationID: UUID, status: RepoGitStatus)
         case _startGitStatusTimer
+
+        // External indicators (menu bar, dock badge)
+        case _updateExternalIndicators
     }
 
     @Dependency(\.surfaceManager) var surfaceManager
@@ -77,6 +80,7 @@ struct AppReducer {
     @Dependency(\.gitService) var gitService
     @Dependency(\.socketServer) var socketServer
     @Dependency(\.notificationService) var notificationService
+    @Dependency(\.statusBarController) var statusBarController
     @Dependency(\.uuid) var uuid
     @Dependency(\.continuousClock) var clock
 
@@ -212,6 +216,20 @@ struct AppReducer {
                     .send(._startGitStatusTimer)
                 )
 
+            case .workspaces(.element(_, action: .agentStatusChanged)):
+                return .merge(
+                    .send(.persistState),
+                    .send(._updateExternalIndicators)
+                )
+
+            case .workspaces(.element(_, action: .clearPaneStatus(let paneID))):
+                let notifService = notificationService
+                return .merge(
+                    .send(.persistState),
+                    .send(._updateExternalIndicators),
+                    .run { _ in notifService.removeNotification(for: paneID) }
+                )
+
             case .workspaces:
                 // Child workspace actions — persist after mutations
                 return .send(.persistState)
@@ -231,36 +249,48 @@ struct AppReducer {
                 let isFocused = state.activeWorkspaceID == workspace.id
                     && workspace.focusedPaneID == paneID
                 let notifService = notificationService
+                let wsID = workspace.id
                 var effects: [Effect<Action>] = [
                     .send(.workspaces(.element(
                         id: workspace.id,
                         action: .agentStatusChanged(paneID: paneID, event: event)
-                    )))
+                    ))),
+                    .send(._updateExternalIndicators)
                 ]
+                let isAppActive = NSApp.isActive
                 switch event {
                 case .stopped:
-                    if !isFocused || !NSApp.isActive {
-                        let title = workspace.panes[id: paneID]?.title ?? workspace.name
-                        effects.append(.run { _ in
+                    let shouldNotify = !isFocused || !isAppActive
+                    let shouldBounce = !isAppActive
+                    let title = workspace.panes[id: paneID]?.title ?? workspace.name
+                    effects.append(.run { _ in
+                        if shouldNotify {
                             notifService.post(
                                 title: title,
                                 body: "Agent is waiting for input",
-                                paneID: paneID
+                                paneID: paneID,
+                                workspaceID: wsID
                             )
-                        })
-                    }
+                        }
+                        if shouldBounce {
+                            await MainActor.run {
+                                NSApp.requestUserAttention(.informationalRequest)
+                            }
+                        }
+                    })
                 case .error(let message):
                     effects.append(.run { _ in
                         notifService.post(
                             title: "Agent Error",
                             body: message,
-                            paneID: paneID
+                            paneID: paneID,
+                            workspaceID: wsID
                         )
                     })
                 case .notification(let title, let body):
                     if !isFocused || !NSApp.isActive {
                         effects.append(.run { _ in
-                            notifService.post(title: title, body: body, paneID: paneID)
+                            notifService.post(title: title, body: body, paneID: paneID, workspaceID: wsID)
                         })
                     }
                 case .started:
@@ -448,6 +478,61 @@ struct AppReducer {
                     }
                 }
                 .cancellable(id: GitStatusTimerID.timer, cancelInFlight: true)
+
+            // MARK: - External Indicators
+
+            case ._updateExternalIndicators:
+                var totalWaiting = 0
+                var totalRunning = 0
+                var statusItems: [StatusBarItem] = []
+
+                for workspace in state.workspaces {
+                    for pane in workspace.panes {
+                        switch pane.status {
+                        case .waitingForInput:
+                            totalWaiting += 1
+                            statusItems.append(StatusBarItem(
+                                workspaceName: workspace.name,
+                                workspaceColor: workspace.color,
+                                paneTitle: pane.title ?? "Shell",
+                                paneID: pane.id,
+                                workspaceID: workspace.id,
+                                status: pane.status
+                            ))
+                        case .running:
+                            totalRunning += 1
+                            statusItems.append(StatusBarItem(
+                                workspaceName: workspace.name,
+                                workspaceColor: workspace.color,
+                                paneTitle: pane.title ?? "Shell",
+                                paneID: pane.id,
+                                workspaceID: workspace.id,
+                                status: pane.status
+                            ))
+                        case .idle:
+                            break
+                        }
+                    }
+                }
+
+                let controller = statusBarController
+                let finalWaiting = totalWaiting
+                let finalRunning = totalRunning
+                let finalItems = statusItems
+                return .run { _ in
+                    await MainActor.run {
+                        controller.update(
+                            waitingCount: finalWaiting,
+                            runningCount: finalRunning,
+                            items: finalItems
+                        )
+                        if finalWaiting > 0 {
+                            NSApp.dockTile.badgeLabel = "\(finalWaiting)"
+                        } else {
+                            NSApp.dockTile.badgeLabel = nil
+                        }
+                    }
+                }
             }
         }
         .forEach(\.workspaces, action: \.workspaces) {

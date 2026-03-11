@@ -250,7 +250,11 @@ struct WorkspaceFeature {
                 return .none
 
             case .clearPaneStatus(let paneID):
-                state.panes[id: paneID]?.status = .idle
+                // Only clear waitingForInput — don't clobber .running if the agent
+                // already started again before the 600ms focus timer fired.
+                if state.panes[id: paneID]?.status == .waitingForInput {
+                    state.panes[id: paneID]?.status = .idle
+                }
                 return .none
 
             case .addRepoAssociation(let assoc):
