@@ -83,12 +83,12 @@ struct WorkspaceRowView: View {
     @ViewBuilder
     private var gitStatusDot: some View {
         let dotColor: Color = switch gitStatus {
-        case .unknown: .gray
+        case .unknown: .secondary
         case .clean: .green
-        case .dirty: .red
+        case .dirty: .orange
         }
-        Circle()
-            .fill(dotColor)
-            .frame(width: 6, height: 6)
+        Image(systemName: "arrow.triangle.branch")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(dotColor)
     }
 }

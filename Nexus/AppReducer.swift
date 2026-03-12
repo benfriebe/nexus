@@ -245,6 +245,14 @@ struct AppReducer {
                     ws.panes[id: paneID] != nil
                 }) else { return .none }
 
+                // If we get a "start" while already running, the previous "stop"
+                // was missed (e.g. user interrupted Claude). Reset to idle first
+                // so the status lifecycle stays clean.
+                if case .started = event,
+                   workspace.panes[id: paneID]?.status == .running {
+                    state.workspaces[id: workspace.id]?.panes[id: paneID]?.status = .idle
+                }
+
                 // Fire desktop notification for agent events (unless pane is focused)
                 let isFocused = state.activeWorkspaceID == workspace.id
                     && workspace.focusedPaneID == paneID

@@ -102,6 +102,7 @@ struct WorkspaceFeatureTests {
 
         await store.send(.rename("New")) { state in
             state.name = "New"
+            state.slug = WorkspaceFeature.State.makeSlug(from: "New", id: state.id)
         }
     }
 

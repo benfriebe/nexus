@@ -104,6 +104,7 @@ struct WorkspaceFeature {
             switch action {
             case .rename(let newName):
                 state.name = newName
+                state.slug = State.makeSlug(from: newName, id: state.id)
                 return .none
 
             case .setColor(let color):
