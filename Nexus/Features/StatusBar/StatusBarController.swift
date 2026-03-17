@@ -129,6 +129,7 @@ final class StatusBarController: NSObject, @unchecked Sendable {
         }
     }
 
+    @MainActor
     private func updatePopoverContent(popover: NSPopover? = nil) {
         let target = popover ?? self.popover
         let currentItems = items
@@ -145,6 +146,7 @@ final class StatusBarController: NSObject, @unchecked Sendable {
         target?.contentViewController = viewController
     }
 
+    @MainActor
     private func removeEventMonitor() {
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)

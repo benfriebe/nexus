@@ -316,7 +316,7 @@ struct AppReducer {
                     ))),
                     .send(._updateExternalIndicators)
                 ]
-                let isAppActive = NSApp.isActive
+                let isAppActive = MainActor.assumeIsolated { NSApp.isActive }
                 switch event {
                 case .stopped:
                     let shouldNotify = !isFocused || !isAppActive
@@ -347,7 +347,7 @@ struct AppReducer {
                         )
                     })
                 case .notification(let title, let body):
-                    if !isFocused || !NSApp.isActive {
+                    if !isFocused || !MainActor.assumeIsolated({ NSApp.isActive }) {
                         effects.append(.run { _ in
                             notifService.post(title: title, body: body, paneID: paneID, workspaceID: wsID)
                         })
@@ -386,7 +386,7 @@ struct AppReducer {
                 if let workspace = state.workspaces.first(where: { $0.panes[id: paneID] != nil }),
                    state.activeWorkspaceID == workspace.id,
                    workspace.focusedPaneID == paneID,
-                   NSApp.isActive {
+                   MainActor.assumeIsolated({ NSApp.isActive }) {
                     return .none
                 }
                 let notifService = notificationService

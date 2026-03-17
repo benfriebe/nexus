@@ -122,7 +122,9 @@ struct ContentView: View {
             .onAppear {
                 // Start socket server and wire events to AppReducer
                 socketServer.onEvent = { paneID, event in
-                    store.send(.socketEvent(paneID: paneID, event: event))
+                    Task { @MainActor in
+                        store.send(.socketEvent(paneID: paneID, event: event))
+                    }
                 }
                 socketServer.start()
             }
