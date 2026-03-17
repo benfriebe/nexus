@@ -147,29 +147,33 @@ final class SocketServer: Sendable {
     }
 
     private func processData(_ data: Data) {
-        guard let text = String(data: data, encoding: .utf8) else { return }
+        let events = Self.parseData(data)
+        guard !events.isEmpty else { return }
 
-        // Split on newlines — each line is a separate JSON message
-        for line in text.split(separator: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty,
-                  let jsonData = trimmed.data(using: .utf8) else { continue }
-            parseMessage(jsonData)
+        let callback = lock.withLock { onEvent }
+        DispatchQueue.main.async {
+            for (paneID, event) in events {
+                callback?(paneID, event)
+            }
         }
     }
 
-    private func parseMessage(_ data: Data) {
-        struct Message: Decodable {
-            let event: String
-            let pane_id: String
-            var message: String?
-            var title: String?
-            var body: String?
-            var session_id: String?
-        }
+    // MARK: - Static Parsing (testable)
 
+    struct Message: Decodable {
+        let event: String
+        let pane_id: String
+        var message: String?
+        var title: String?
+        var body: String?
+        var session_id: String?
+    }
+
+    /// Parse a single JSON message into a (paneID, event, message) tuple.
+    /// Returns nil if the data is invalid or the event type is unrecognized.
+    static func parseMessage(_ data: Data) -> (UUID, AgentEvent, Message)? {
         guard let msg = try? JSONDecoder().decode(Message.self, from: data),
-              let paneID = UUID(uuidString: msg.pane_id) else { return }
+              let paneID = UUID(uuidString: msg.pane_id) else { return nil }
 
         let agentEvent: AgentEvent
         switch msg.event {
@@ -185,23 +189,39 @@ final class SocketServer: Sendable {
                 body: msg.body ?? ""
             )
         case "session-start":
-            guard let sessionID = msg.session_id, !sessionID.isEmpty else { return }
+            guard let sessionID = msg.session_id, !sessionID.isEmpty else { return nil }
             agentEvent = .sessionStarted(sessionID: sessionID)
         default:
-            return
+            return nil
         }
 
-        let callback = lock.withLock { onEvent }
-        DispatchQueue.main.async {
-            callback?(paneID, agentEvent)
+        return (paneID, agentEvent, msg)
+    }
+
+    /// Parse newline-separated JSON data into an array of (paneID, event) tuples.
+    /// Handles the session_id dual-fire logic: if a non-session-start event
+    /// includes a session_id, a .sessionStarted event is also emitted.
+    static func parseData(_ data: Data) -> [(UUID, AgentEvent)] {
+        guard let text = String(data: data, encoding: .utf8) else { return [] }
+
+        var results: [(UUID, AgentEvent)] = []
+        for line in text.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty,
+                  let jsonData = trimmed.data(using: .utf8) else { continue }
+
+            guard let (paneID, event, msg) = parseMessage(jsonData) else { continue }
+            results.append((paneID, event))
+
             // session_id is a common field on all Claude Code hook stdin JSON.
             // Fire .sessionStarted whenever it's present (unless the event
             // itself is already session-start, to avoid a duplicate).
             if msg.event != "session-start",
                let sessionID = msg.session_id, !sessionID.isEmpty {
-                callback?(paneID, .sessionStarted(sessionID: sessionID))
+                results.append((paneID, .sessionStarted(sessionID: sessionID)))
             }
         }
+        return results
     }
 
     deinit {
