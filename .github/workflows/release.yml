@@ -34,7 +34,7 @@ jobs:
       - name: Build libghostty
         run: |
           cd ghostty
-          zig build -Dapp-runtime=none -Doptimize=ReleaseFast
+          zig build -Dapp-runtime=none -Doptimize=ReleaseFast -Demit-macos-app=false
           FAT_LIB=$(find .zig-cache -name "libghostty-fat.a" -type f | head -1)
           cp "$FAT_LIB" ../lib/libghostty.a
 
