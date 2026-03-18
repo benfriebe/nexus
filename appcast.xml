@@ -6,5 +6,17 @@
     <description>Nexus update feed</description>
     <language>en</language>
     <!-- Items will be prepended by the release workflow -->
+    <item>
+    <title>Version 0.3.8</title>
+    <pubDate>Wed, 18 Mar 2026 01:25:46 +0000</pubDate>
+    <sparkle:version>0.3.8</sparkle:version>
+    <sparkle:shortVersionString>0.3.8</sparkle:shortVersionString>
+    <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    <enclosure
+      url="https://github.com/benfriebe/nexus/releases/download/v0.3.8/Nexus-0.3.8.dmg"
+      sparkle:edSignature="IFVtCFjV6eITrkVcRE2Pf8mlWVdTMR/Cl6hYVP5apaW9CZKLc74FprtPwPKaSwBwmyivc3pCo1LapUJaOTHPBA=="
+      length="10149535"
+      type="application/octet-stream" />
+  </item>
   </channel>
 </rss>
