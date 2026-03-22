@@ -128,13 +128,16 @@ struct SettingsFeature {
                             encoding: .utf8
                         )
 
-                        // Rebuild ghostty config with overrides
+                        // Rebuild ghostty config with overrides.
+                        // Guard: ghostty_config_new() requires ghostty_init() to have run.
+                        // This effect can fire before GhosttyApp.start() if the Settings
+                        // window is opened before the main window appears.
+                        guard GhosttyApp.shared.app != nil else { return }
+
                         let newConfig = GhosttyConfig(overrideFile: overridePath)
                         newConfig.finalize()
 
-                        if let app = GhosttyApp.shared.app {
-                            ghostty_app_update_config(app, newConfig.rawConfig)
-                        }
+                        ghostty_app_update_config(GhosttyApp.shared.app!, newConfig.rawConfig)
                         GhosttyApp.shared.config = newConfig
 
                         // Update window compositing

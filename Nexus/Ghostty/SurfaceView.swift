@@ -18,12 +18,19 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
     /// drag resize) into a single set_size so the shell only gets one SIGWINCH.
     private var resizeWorkItem: DispatchWorkItem?
 
+    private static let dropTypes: [NSPasteboard.PasteboardType] = [
+        .fileURL,
+        .URL,
+        .string
+    ]
+
     init(paneID: UUID, workingDirectory: String, backgroundOpacity: Double = 1.0) {
         self.paneID = paneID
         super.init(frame: .zero)
         wantsLayer = true
         layer?.isOpaque = backgroundOpacity >= 1.0
         layerContentsRedrawPolicy = .duringViewResize
+        registerForDraggedTypes(Self.dropTypes)
 
         guard let app = GhosttyApp.shared.app else { return }
 
@@ -405,6 +412,51 @@ final class SurfaceView: NSView, @preconcurrency NSTextInputClient {
 
     func characterIndex(for _: NSPoint) -> Int {
         0
+    }
+
+    // MARK: - Drag and drop
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard let types = sender.draggingPasteboard.types else { return [] }
+        if Set(types).isDisjoint(with: Set(Self.dropTypes)) {
+            return []
+        }
+        return .copy
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        let pb = sender.draggingPasteboard
+
+        let content: String? = if let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL], !urls.isEmpty {
+            urls
+                .map { Self.shellEscape($0.isFileURL ? $0.path : $0.absoluteString) }
+                .joined(separator: " ")
+        } else if let str = pb.string(forType: .string) {
+            str
+        } else {
+            nil
+        }
+
+        if let content {
+            insertText(content, replacementRange: NSRange(location: 0, length: 0))
+            return true
+        }
+        return false
+    }
+
+    /// Escape shell-sensitive characters so dropped paths are safe to paste into a terminal.
+    private static let shellEscapeChars = CharacterSet(charactersIn: " \\()[]{}<>\"'`!#$&;|*?\t")
+
+    private static func shellEscape(_ str: String) -> String {
+        var result = ""
+        result.reserveCapacity(str.count)
+        for char in str.unicodeScalars {
+            if shellEscapeChars.contains(char) {
+                result.append("\\")
+            }
+            result.append(Character(char))
+        }
+        return result
     }
 
     // MARK: - Helpers
