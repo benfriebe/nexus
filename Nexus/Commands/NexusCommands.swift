@@ -93,9 +93,10 @@ final class PaneShortcutMonitor {
         if event.keyCode == 13 /* w */ && flags == .command {
             if let workspace = store.workspaces[id: activeID],
                let focusedID = workspace.focusedPaneID {
-                // Don't close if it's the last pane — close the workspace instead
+                // Last pane — close the workspace instead
                 if workspace.panes.count <= 1 {
-                    return false // Let default handling occur
+                    store.send(.deleteWorkspace(activeID))
+                    return true
                 }
                 store.send(.workspaces(.element(
                     id: activeID,
